@@ -91,7 +91,7 @@ export default function MapScreen() {
       const { data: robotData, error: robotError } = await supabase.from('robot_state').select('*').maybeSingle();
 
       if (!classroomsError && classroomsData) setClassrooms(classroomsData);
-      if (!facultiesError && facultiesData) setFacilities(facultiesData);
+      if (!facultiesError && facultiesData) setFaculties(facultiesData);
       if (!robotError && robotData) {
         setRobotState(robotData);
         if (robotData.status === 'moving' && robotData.target_classroom_id) {
