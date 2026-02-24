@@ -10,23 +10,13 @@ import {
   Alert,
 } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { supabase } from '@/lib/supabase';
+import { getFaculties, addFaculty, getClassrooms, addClassroom, updateRobotState } from '@/lib/storage';
+import type { Faculty, Classroom } from '@/lib/storage';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Building2, Plus, School, X, MapPin, Navigation } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 
-interface Faculty {
-  id: string;
-  name: string;
-  floors: number;
-}
-
-interface Classroom {
-  id: string;
-  name: string;
-  faculty_id: string;
-  floor: number;
-  room_type: string;
+interface ClassroomWithFaculty extends Classroom {
   faculties?: { name: string };
 }
 
@@ -34,7 +24,7 @@ export default function ManageScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const [faculties, setFaculties] = useState<Faculty[]>([]);
-  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [classrooms, setClassrooms] = useState<ClassroomWithFaculty[]>([]);
   const [showFacultyModal, setShowFacultyModal] = useState(false);
   const [showClassroomModal, setShowClassroomModal] = useState(false);
 
@@ -52,62 +42,67 @@ export default function ManageScreen() {
 
   const loadData = async () => {
     try {
-      const { data: facultiesData, error: facultiesError } = await supabase
-        .from('faculties')
-        .select('*')
-        .order('name');
+      const [facultiesData, classroomsData] = await Promise.all([
+        getFaculties(),
+        getClassrooms(),
+      ]);
 
-      const { data: classroomsData, error: classroomsError } = await supabase
-        .from('classrooms')
-        .select('*, faculties(name)')
-        .order('name');
+      setFaculties(facultiesData);
 
-      if (!facultiesError && facultiesData) setFaculties(facultiesData);
-      if (!classroomsError && classroomsData) setClassrooms(classroomsData);
+      // Enrich classrooms with faculty names
+      const enrichedClassrooms = classroomsData.map((classroom) => ({
+        ...classroom,
+        faculties: { name: facultiesData.find((f) => f.id === classroom.faculty_id)?.name || 'Unknown' },
+      }));
+
+      setClassrooms(enrichedClassrooms);
     } catch (error) {
       console.error('Error loading manage data:', error);
     }
   };
 
-  const addFaculty = async () => {
+  const addFacultyLocal = async () => {
     if (!facultyName.trim()) {
       Alert.alert('Error', 'Please enter faculty name');
       return;
     }
 
-    const { error } = await supabase.from('faculties').insert({
-      name: facultyName,
-      floors: parseInt(facultyFloors) || 1,
-    });
+    try {
+      await addFaculty({
+        name: facultyName,
+        floors: parseInt(facultyFloors) || 1,
+      });
 
-    if (!error) {
       setFacultyName('');
       setFacultyFloors('1');
       setShowFacultyModal(false);
       loadData();
       Alert.alert('Success', 'Faculty added successfully');
+    } catch (error) {
+      console.error('Error adding faculty:', error);
+      Alert.alert('Error', 'Failed to add faculty');
     }
   };
 
-  const addClassroom = async () => {
+  const addClassroomLocal = async () => {
     if (!classroomName.trim() || !selectedFacultyId) {
       Alert.alert('Error', 'Please fill all fields');
       return;
     }
 
-    const randomX = Math.random() * 300 + 50;
-    const randomY = Math.random() * 300 + 50;
+    try {
+      const randomX = Math.random() * 300 + 50;
+      const randomY = Math.random() * 300 + 50;
 
-    const { error } = await supabase.from('classrooms').insert({
-      name: classroomName,
-      faculty_id: selectedFacultyId,
-      floor: parseInt(classroomFloor) || 1,
-      room_type: roomType,
-      x_coordinate: randomX,
-      y_coordinate: randomY,
-    });
+      await addClassroom({
+        name: classroomName,
+        faculty_id: selectedFacultyId,
+        floor: parseInt(classroomFloor) || 1,
+        room_type: roomType,
+        x_coordinate: randomX,
+        y_coordinate: randomY,
+      });
 
-    if (!error) {
       setClassroomName('');
       setSelectedFacultyId('');
       setClassroomFloor('1');
@@ -115,27 +110,24 @@ export default function ManageScreen() {
       setShowClassroomModal(false);
       loadData();
       Alert.alert('Success', 'Classroom added successfully');
+    } catch (error) {
+      console.error('Error adding classroom:', error);
+      Alert.alert('Error', 'Failed to add classroom');
     }
   };
 
-  const navigateToClassroom = async (classroom: Classroom) => {
-    const { data: robotData } = await supabase
-      .from('robot_state')
-      .select('*')
-      .maybeSingle();
-
-    if (robotData) {
-      await supabase
-        .from('robot_state')
-        .update({
-          status: 'moving',
-          target_classroom_id: classroom.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', robotData.id);
+  const navigateToClassroom = async (classroom: ClassroomWithFaculty) => {
+    try {
+      await updateRobotState({
+        status: 'moving',
+        target_classroom_id: classroom.id,
+      });
 
       Alert.alert('Navigation Started', `Robot is moving to ${classroom.name}`);
       router.push('/(tabs)/map');
+    } catch (error) {
+      console.error('Error navigating:', error);
+      Alert.alert('Error', 'Failed to start navigation');
     }
   };
 
@@ -251,7 +243,7 @@ export default function ManageScreen() {
 
             <TouchableOpacity
               style={[styles.submitButton, { backgroundColor: colors.primary }]}
-              onPress={addFaculty}
+              onPress={addFacultyLocal}
             >
               <Text style={styles.submitButtonText}>Add Faculty</Text>
             </TouchableOpacity>
@@ -349,7 +341,7 @@ export default function ManageScreen() {
 
             <TouchableOpacity
               style={[styles.submitButton, { backgroundColor: colors.accent }]}
-              onPress={addClassroom}
+              onPress={addClassroomLocal}
             >
               <Text style={styles.submitButtonText}>Add Classroom</Text>
             </TouchableOpacity>

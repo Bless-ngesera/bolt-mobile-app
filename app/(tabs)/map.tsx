@@ -10,7 +10,8 @@ import {
   Alert,
 } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { supabase } from '@/lib/supabase';
+import { getClassrooms, getFaculties, getRobotState, updateRobotState } from '@/lib/storage';
+import type { Classroom, RobotState, Faculty } from '@/lib/storage';
 import Animated, {
   FadeInDown,
   useAnimatedStyle,
@@ -29,33 +30,13 @@ import {
   UserRoundSearch,
 } from 'lucide-react-native';
 
-interface Classroom {
-  id: string;
-  name: string;
-  faculty_id: string;
-  floor: number;
-  room_type: string;
-  x_coordinate: number;
-  y_coordinate: number;
+interface ClassroomWithFaculty extends Classroom {
   faculties?: { name: string };
-}
-
-interface RobotState {
-  id: string;
-  status: string;
-  current_x: number;
-  current_y: number;
-  target_classroom_id: string | null;
-}
-
-interface Faculty {
-  id: string;
-  name: string;
 }
 
 export default function MapScreen() {
   const { colors } = useTheme();
-  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [classrooms, setClassrooms] = useState<ClassroomWithFaculty[]>([]);
   const [faculties, setFaculties] = useState<Faculty[]>([]);
   const [robotState, setRobotState] = useState<RobotState | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,22 +62,24 @@ export default function MapScreen() {
 
   const loadData = async () => {
     try {
-      const { data: classroomsData, error: classroomsError } = await supabase
-        .from('classrooms')
-        .select('*, faculties(name)')
-        .order('name');
+      const [classroomsData, facultiesData, robotData] = await Promise.all([
+        getClassrooms(),
+        getFaculties(),
+        getRobotState(),
+      ]);
 
-      const { data: facultiesData, error: facultiesError } = await supabase.from('faculties').select('*').order('name');
+      // Enrich classrooms with faculty names
+      const enrichedClassrooms: ClassroomWithFaculty[] = classroomsData.map((classroom: Classroom) => ({
+        ...classroom,
+        faculties: { name: facultiesData.find((f: Faculty) => f.id === classroom.faculty_id)?.name || 'Unknown' },
+      }));
 
-      const { data: robotData, error: robotError } = await supabase.from('robot_state').select('*').maybeSingle();
+      setClassrooms(enrichedClassrooms);
+      setFaculties(facultiesData);
+      setRobotState(robotData);
 
-      if (!classroomsError && classroomsData) setClassrooms(classroomsData);
-      if (!facultiesError && facultiesData) setFaculties(facultiesData);
-      if (!robotError && robotData) {
-        setRobotState(robotData);
-        if (robotData.status === 'moving' && robotData.target_classroom_id) {
-          simulateRobotMovement(robotData);
-        }
+      if (robotData.status === 'moving' && robotData.target_classroom_id) {
+        simulateRobotMovement(robotData);
       }
     } catch (error) {
       console.error('Error loading map data:', error);
@@ -112,15 +95,11 @@ export default function MapScreen() {
     const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
     if (distance < 5) {
-      await supabase
-        .from('robot_state')
-        .update({
-          status: 'arrived',
-          current_x: target.x_coordinate,
-          current_y: target.y_coordinate,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', robot.id);
+      await updateRobotState({
+        status: 'arrived',
+        current_x: target.x_coordinate,
+        current_y: target.y_coordinate,
+      });
       return;
     }
 
@@ -128,30 +107,31 @@ export default function MapScreen() {
     const newX = robot.current_x + (deltaX / distance) * step;
     const newY = robot.current_y + (deltaY / distance) * step;
 
-    await supabase
-      .from('robot_state')
-      .update({
-        current_x: newX,
-        current_y: newY,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', robot.id);
+    await updateRobotState({
+      current_x: newX,
+      current_y: newY,
+    });
   };
 
   const navigateToClassroom = async (classroomId: string) => {
     if (!robotState) return;
 
-    await supabase
-      .from('robot_state')
-      .update({
+    try {
+      const updated = await updateRobotState({
         status: 'moving',
         target_classroom_id: classroomId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', robotState.id);
+      });
 
-    const classroom = classrooms.find((c) => c.id === classroomId);
-    Alert.alert('Navigation Started', `Robot is moving to ${classroom?.name}`);
+      setRobotState(updated);
+
+      const classroom = classrooms.find((c) => c.id === classroomId);
+      if (classroom) {
+        Alert.alert('Navigation Started', `Robot is moving to ${classroom.name}`);
+      }
+    } catch (error) {
+      console.error('Error navigating:', error);
+      Alert.alert('Error', 'Failed to navigate');
+    }
   };
 
   const guideStudent = async () => {

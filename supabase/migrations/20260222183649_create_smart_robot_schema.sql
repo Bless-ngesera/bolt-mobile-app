@@ -127,9 +127,9 @@ CREATE POLICY "Public can update robot state"
   USING (true)
   WITH CHECK (true);
 
--- Insert initial robot state
-INSERT INTO robot_state (status, battery_level, current_x, current_y)
-VALUES ('idle', 100, 0, 0)
+-- Insert initial robot state with proper upsert
+INSERT INTO robot_state (id, status, battery_level, current_x, current_y)
+VALUES (gen_random_uuid(), 'idle', 100, 0, 0)
 ON CONFLICT DO NOTHING;
 
 -- Insert demo faculties

@@ -1,13 +1,15 @@
-import { createClient } from '@supabase/supabase-js';
-import 'react-native-url-polyfill/auto';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+// Initialize Supabase client if environment variables are present.
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    'Missing Supabase environment variables. Please check your .env file.'
-  );
+export const supabase: SupabaseClient | null =
+	SUPABASE_URL && SUPABASE_ANON_KEY ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+export async function testConnection(): Promise<boolean> {
+	if (!supabase) return false;
+	const { data, error } = await supabase.from('faculties').select('id').limit(1);
+	if (error) throw error;
+	return true;
 }
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);

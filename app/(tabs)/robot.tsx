@@ -8,7 +8,8 @@ import {
   Alert,
 } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
-import { supabase } from '@/lib/supabase';
+import { getRobotState, updateRobotState } from '@/lib/storage';
+import type { RobotState } from '@/lib/storage';
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import {
   Bot,
@@ -25,16 +26,6 @@ import {
   CircleAlert,
 } from 'lucide-react-native';
 
-interface RobotState {
-  id: string;
-  status: string;
-  battery_level: number;
-  current_x: number;
-  current_y: number;
-  target_classroom_id?: string | null;
-  updated_at?: string;
-}
-
 export default function RobotControl() {
   const { colors } = useTheme();
   const [robotState, setRobotState] = useState<RobotState | null>(null);
@@ -49,34 +40,21 @@ export default function RobotControl() {
 
   const loadRobotState = async () => {
     try {
-      const { data, error } = await supabase
-        .from('robot_state')
-        .select('*')
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error loading robot state:', error);
-        return;
-      }
-
-      if (data) {
-        setRobotState(data);
-      }
+      const data = await getRobotState();
+      setRobotState(data);
     } catch (error) {
       console.error('Error loading robot state:', error);
     }
   };
 
-  const updateRobotState = async (updates: Partial<RobotState>) => {
+  const updateRobotStateLocal = async (updates: Partial<RobotState>) => {
     if (!robotState) return;
 
-    const { error } = await supabase
-      .from('robot_state')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', robotState.id);
-
-    if (!error) {
-      setRobotState((prev) => (prev ? { ...prev, ...updates } : null));
+    try {
+      const updated = await updateRobotState({ ...updates, id: robotState.id });
+      setRobotState(updated);
+    } catch (error) {
+      console.error('Error updating robot state:', error);
     }
   };
 
@@ -90,14 +68,14 @@ export default function RobotControl() {
     const newX = Math.max(0, Math.min(400, robotState.current_x + deltaX));
     const newY = Math.max(0, Math.min(400, robotState.current_y + deltaY));
 
-    await updateRobotState({
+    await updateRobotStateLocal({
       current_x: newX,
       current_y: newY,
       status: 'moving',
     });
 
     setTimeout(() => {
-      updateRobotState({ status: 'idle' });
+      updateRobotStateLocal({ status: 'idle' });
     }, 1000);
   };
 
@@ -106,9 +84,9 @@ export default function RobotControl() {
       robotScale.value = withSpring(1);
     });
 
-    await updateRobotState({ status: 'moving' });
+    await updateRobotStateLocal({ status: 'moving' });
     setTimeout(() => {
-      updateRobotState({ status: 'idle' });
+      updateRobotStateLocal({ status: 'idle' });
     }, 800);
   };
 
@@ -117,7 +95,7 @@ export default function RobotControl() {
   };
 
   const emergencyStop = async () => {
-    await updateRobotState({ status: 'idle', target_classroom_id: null });
+    await updateRobotStateLocal({ status: 'idle', target_classroom_id: null });
     Alert.alert('Emergency Stop', 'Robot has been stopped');
   };
 
