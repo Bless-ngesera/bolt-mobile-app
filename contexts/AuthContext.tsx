@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { initializeStorage } from '@/lib/storage';
 
 interface User {
   email: string;
@@ -25,6 +26,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadUser = async () => {
     try {
+      // Initialize storage first to prevent race conditions
+      await initializeStorage();
+      
       const userData = await AsyncStorage.getItem('user');
       if (userData) {
         setUser(JSON.parse(userData));
